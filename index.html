@@ -438,6 +438,63 @@
             transition: width 0.5s ease;
         }
 
+        /* ========== PIN Gate ========== */
+        .pin-gate {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: var(--bg-deep);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .pin-gate.hidden { display: none; }
+
+        .pin-title {
+            font-family: var(--font-display);
+            font-size: 2rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #d4a245, #f0d08c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .pin-input {
+            font-family: var(--font-mono);
+            font-size: 1.2rem;
+            text-align: center;
+            width: 220px;
+            padding: 14px 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-1);
+            outline: none;
+            transition: border-color 0.2s;
+            -webkit-text-security: disc;
+        }
+
+        .pin-input:focus { border-color: var(--gold); }
+        .pin-input.error {
+            border-color: var(--red);
+            animation: shake 0.4s ease;
+        }
+
+        .pin-hint {
+            font-size: 0.78rem;
+            color: var(--text-3);
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-6px); }
+            40%, 80% { transform: translateX(6px); }
+        }
+
         /* ========== Toast ========== */
         .toast-container {
             position: fixed;
@@ -500,6 +557,14 @@
     </style>
 </head>
 <body>
+    <!-- PIN Gate -->
+    <div class="pin-gate" id="pin-gate">
+        <span class="pin-title">Yawm</span>
+        <input class="pin-input" id="pin-input" type="password" placeholder="Enter PIN" autofocus
+            onkeydown="if(event.key==='Enter')checkPin()">
+        <span class="pin-hint">Press enter to continue</span>
+    </div>
+
     <!-- Header -->
     <header class="header">
         <div class="header-left">
@@ -1252,9 +1317,39 @@
     }
 
     // ================================================
+    // PIN Gate
+    // ================================================
+    const PIN_HASH = '5d9a67fd02d36808231550b4868ad2fc5cdd110c5091233f748276f6f63c9dde';
+
+    async function sha256(text) {
+        const buf = await crypto.subtle.digest('SHA-256',
+            new TextEncoder().encode(text));
+        return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function checkPin() {
+        const input = document.getElementById('pin-input');
+        const hash = await sha256(input.value);
+        if (hash === PIN_HASH) {
+            sessionStorage.setItem('yawm-auth', '1');
+            document.getElementById('pin-gate').classList.add('hidden');
+            loadDashboard();
+        } else {
+            input.classList.add('error');
+            input.value = '';
+            setTimeout(() => input.classList.remove('error'), 400);
+        }
+    }
+
+    // ================================================
     // Boot
     // ================================================
-    document.addEventListener('DOMContentLoaded', loadDashboard);
+    document.addEventListener('DOMContentLoaded', () => {
+        if (sessionStorage.getItem('yawm-auth') === '1') {
+            document.getElementById('pin-gate').classList.add('hidden');
+            loadDashboard();
+        }
+    });
 
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
