@@ -137,6 +137,23 @@
         .range-btn:hover { color: var(--text-1); background: rgba(255,255,255,0.04); }
         .range-btn.active { color: var(--gold); background: rgba(212,162,69,0.1); }
 
+        .range-input {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            width: 60px;
+            padding: 7px 8px;
+            background: none;
+            border: none;
+            border-left: 1px solid var(--border);
+            color: var(--text-1);
+            text-align: center;
+            -moz-appearance: textfield;
+        }
+        .range-input::-webkit-outer-spin-button,
+        .range-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+        .range-input::placeholder { color: var(--text-3); }
+        .range-input:focus { outline: none; background: rgba(212,162,69,0.08); }
+
         .refresh-btn {
             display: flex;
             align-items: center;
@@ -245,10 +262,13 @@
         .card-sub.down { color: var(--red); }
         .card-sub.neutral { color: var(--text-3); }
 
-        .card-date {
-            font-size: 0.7rem;
+        .card-date-line {
+            display: block;
+            font-size: 0.72rem;
             color: var(--text-3);
             font-family: var(--font-mono);
+            margin-bottom: 8px;
+            min-height: 16px;
         }
 
         .card-wow {
@@ -492,6 +512,7 @@
                 <button class="range-btn" data-range="30" onclick="setRange(30)">30D</button>
                 <button class="range-btn" data-range="90" onclick="setRange(90)">90D</button>
                 <button class="range-btn" data-range="all" onclick="setRange('all')">ALL</button>
+                <input type="number" class="range-input" id="custom-range" placeholder="Days" min="1" max="999" value="7" onkeydown="if(event.key==='Enter'){setRange(Number(this.value));this.blur()}" onchange="setRange(Number(this.value))">
             </div>
             <button class="refresh-btn" onclick="refresh()">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -512,6 +533,7 @@
                 <div class="card-accent" style="background: linear-gradient(90deg, var(--gold), transparent)"></div>
                 <span class="card-label">Daily Active Users</span>
                 <span class="card-value skeleton">&nbsp;&nbsp;&nbsp;&nbsp;</span>
+                <span class="card-date-line"></span>
                 <span class="card-sub neutral"></span>
                 <span class="card-wow neutral"></span>
             </div>
@@ -519,6 +541,7 @@
                 <div class="card-accent" style="background: linear-gradient(90deg, var(--teal), transparent)"></div>
                 <span class="card-label">Goal Completions</span>
                 <span class="card-value skeleton">&nbsp;&nbsp;&nbsp;&nbsp;</span>
+                <span class="card-date-line"></span>
                 <span class="card-sub neutral"></span>
                 <span class="card-wow neutral"></span>
             </div>
@@ -526,12 +549,14 @@
                 <div class="card-accent" style="background: linear-gradient(90deg, var(--blue), transparent)"></div>
                 <span class="card-label">Total Signups</span>
                 <span class="card-value skeleton">&nbsp;&nbsp;&nbsp;&nbsp;</span>
+                <span class="card-date-line"></span>
                 <span class="card-sub neutral"></span>
             </div>
             <div class="metric-card" id="card-streakers">
                 <div class="card-accent" style="background: linear-gradient(90deg, var(--coral), transparent)"></div>
                 <span class="card-label">Active Streakers</span>
                 <span class="card-value skeleton">&nbsp;&nbsp;&nbsp;&nbsp;</span>
+                <span class="card-date-line"></span>
                 <span class="card-sub neutral"></span>
             </div>
         </section>
@@ -641,29 +666,36 @@
     // ================================================
     // Card Updates
     // ================================================
-    function setCard(id, value, change, subText, wow) {
+    function setCard(id, value, opts = {}) {
         const card = document.getElementById(id);
         const valEl = card.querySelector('.card-value');
+        const dateEl = card.querySelector('.card-date-line');
         const subEl = card.querySelector('.card-sub');
         const wowEl = card.querySelector('.card-wow');
 
         valEl.classList.remove('skeleton');
         valEl.textContent = fmt(value);
 
-        if (change != null) {
-            const n = parseFloat(change);
+        // Date line
+        if (dateEl) {
+            dateEl.textContent = opts.date || '';
+        }
+
+        // Day-over-day or info text
+        if (opts.change != null) {
+            const n = parseFloat(opts.change);
             const isUp = n > 0;
             const isZero = n === 0;
             subEl.className = 'card-sub ' + (isZero ? 'neutral' : isUp ? 'up' : 'down');
-            subEl.innerHTML = `${isUp ? '\u2191' : isZero ? '\u2192' : '\u2193'} ${Math.abs(n)}%`
-                + (subText ? ` <span class="card-date">${subText}</span>` : '');
-        } else if (subText) {
+            subEl.textContent = `${isUp ? '\u2191' : isZero ? '\u2192' : '\u2193'} ${Math.abs(n)}% vs yesterday`;
+        } else if (opts.info) {
             subEl.className = 'card-sub neutral';
-            subEl.innerHTML = `<span class="card-date">${subText}</span>`;
+            subEl.textContent = opts.info;
         }
 
-        if (wowEl && wow != null) {
-            const n = parseFloat(wow);
+        // Week-over-week
+        if (wowEl && opts.wow != null) {
+            const n = parseFloat(opts.wow);
             const isUp = n > 0;
             const isZero = n === 0;
             wowEl.className = 'card-wow ' + (isZero ? 'neutral' : isUp ? 'up' : 'down');
@@ -1091,15 +1123,17 @@
         const prev = dau[idx + 1];
         const wow = findWoW(dau, curr.day);
 
-        setCard('card-dau', curr.total_dau,
-            pctChange(curr.total_dau, prev?.total_dau),
-            fmtDate(curr.day),
-            wow ? pctChange(curr.total_dau, wow.total_dau) : null);
+        setCard('card-dau', curr.total_dau, {
+            date: fmtDate(curr.day),
+            change: pctChange(curr.total_dau, prev?.total_dau),
+            wow: wow ? pctChange(curr.total_dau, wow.total_dau) : null
+        });
 
-        setCard('card-completions', curr.daily_goal_completions,
-            pctChange(curr.daily_goal_completions, prev?.daily_goal_completions),
-            fmtDate(curr.day),
-            wow ? pctChange(curr.daily_goal_completions, wow.daily_goal_completions) : null);
+        setCard('card-completions', curr.daily_goal_completions, {
+            date: fmtDate(curr.day),
+            change: pctChange(curr.daily_goal_completions, prev?.daily_goal_completions),
+            wow: wow ? pctChange(curr.daily_goal_completions, wow.daily_goal_completions) : null
+        });
     }
 
     // ================================================
@@ -1135,7 +1169,10 @@
             const settledSignups = allSignups.filter(d => !skipSet.has(d.day));
             const latestSignup = settledSignups[settledSignups.length - 1];
             const latestCount = latestSignup ? Number(latestSignup.user_count) : 0;
-            setCard('card-signups', total, null, '+' + latestCount + ' on ' + (latestSignup ? fmtDate(latestSignup.day) : '—'));
+            setCard('card-signups', total, {
+                date: latestSignup ? fmtDate(latestSignup.day) : '',
+                info: '+' + latestCount + ' new signups'
+            });
             renderSignupsChart(allSignups, currentRange);
         } else if (signupsRes.status === 'rejected') {
             showToast('Failed to load signups: ' + (signupsRes.reason?.message || 'Unknown error'));
@@ -1148,7 +1185,9 @@
             if (totalRow) {
                 const totalUsers = Number(totalRow.users);
                 const activeNow = Number(totalRow.active_now);
-                setCard('card-streakers', activeNow, null, 'of ' + fmt(totalUsers) + ' total');
+                setCard('card-streakers', activeNow, {
+                    info: 'of ' + fmt(totalUsers) + ' total streakers'
+                });
             }
             renderStreaksChart(streaks);
             renderStreaksTable(streaks);
@@ -1168,6 +1207,9 @@
         document.querySelectorAll('.range-btn').forEach(b => {
             b.classList.toggle('active', b.dataset.range == range);
         });
+        const input = document.getElementById('custom-range');
+        if (typeof range === 'number') input.value = range;
+        else input.value = '';
         document.getElementById('dau-loading').style.display = 'flex';
         fetchDAU(range).then(dau => {
             if (dau?.length) {
