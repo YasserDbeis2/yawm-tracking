@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#060a12">
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="apple-touch-icon" href="yawm-icon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Sora:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -548,6 +548,17 @@
             </div>
         </section>
 
+        <!-- DAU History Table -->
+        <section class="table-section">
+            <div class="section-title">
+                <span class="dot" style="background: var(--gold)"></span>
+                DAU History
+            </div>
+            <div id="dau-table-container">
+                <div class="chart-loading" id="dau-table-loading" style="position:relative;height:100px"><div class="spinner"></div>Loading...</div>
+            </div>
+        </section>
+
         <!-- Signups + Streaks Charts -->
         <div class="charts-row">
             <section class="chart-section">
@@ -600,6 +611,7 @@
 
     let currentRange = 7;
     let charts = {};
+    let allSignups = [];
 
     // ================================================
     // Utilities
@@ -708,6 +720,30 @@
     }
 
     // ================================================
+    // Crosshair Plugin
+    // ================================================
+    const crosshairPlugin = {
+        id: 'crosshair',
+        afterDraw(chart) {
+            if (chart.tooltip?._active?.length) {
+                const x = chart.tooltip._active[0].element.x;
+                const ctx = chart.ctx;
+                const top = chart.scales.y.top;
+                const bottom = chart.scales.y.bottom;
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(x, top);
+                ctx.lineTo(x, bottom);
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+    };
+    Chart.register(crosshairPlugin);
+
+    // ================================================
     // Chart Defaults
     // ================================================
     Chart.defaults.color = '#5a6a80';
@@ -750,7 +786,8 @@
                         fill: true,
                         tension: 0.35,
                         pointRadius: 0,
-                        pointHoverRadius: 5,
+                        pointHitRadius: 20,
+                        pointHoverRadius: 6,
                         pointHoverBackgroundColor: '#d4a245',
                         borderWidth: 2,
                     },
@@ -762,7 +799,8 @@
                         fill: true,
                         tension: 0.35,
                         pointRadius: 0,
-                        pointHoverRadius: 5,
+                        pointHitRadius: 20,
+                        pointHoverRadius: 6,
                         pointHoverBackgroundColor: '#2dd4bf',
                         borderWidth: 2,
                     },
@@ -774,7 +812,8 @@
                         fill: true,
                         tension: 0.35,
                         pointRadius: 0,
-                        pointHoverRadius: 5,
+                        pointHitRadius: 20,
+                        pointHoverRadius: 6,
                         pointHoverBackgroundColor: '#fb7185',
                         borderWidth: 2,
                     }
@@ -783,14 +822,15 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
+                interaction: { mode: 'index', intersect: false, axis: 'x' },
+                hover: { mode: 'index', intersect: false },
                 plugins: {
                     legend: {
                         position: 'top',
                         align: 'end',
                         labels: { usePointStyle: true, pointStyle: 'circle', padding: 20, font: { size: 12 } }
                     },
-                    tooltip: tooltipStyle,
+                    tooltip: { ...tooltipStyle, mode: 'index', intersect: false },
                 },
                 scales: {
                     x: {
@@ -809,17 +849,32 @@
     // ================================================
     // Render: Signups Chart
     // ================================================
-    function renderSignupsChart(data) {
+    function filterSignupsByRange(data, range) {
+        if (range === 'all') return data;
+        const cutoff = sinceDate(range);
+        return data.filter(d => d.day >= cutoff);
+    }
+
+    function renderSignupsChart(data, range) {
         document.getElementById('signups-loading').style.display = 'none';
 
         if (charts.signups) charts.signups.destroy();
 
+        // Filter by range and skip unsettled days (UTC fix)
+        let filtered = filterSignupsByRange(data, range);
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
+        const tmrw = new Date(now); tmrw.setDate(tmrw.getDate() + 1);
+        const tomorrow = tmrw.toISOString().split('T')[0];
+        const skip = new Set([today, tomorrow]);
+        filtered = filtered.filter(d => !skip.has(d.day));
+
         // Aggregate by week if many data points
-        let chartData = data;
+        let chartData = filtered;
         let labelPrefix = 'Daily';
-        if (data.length > 90) {
+        if (filtered.length > 90) {
             const weeks = {};
-            data.forEach(d => {
+            filtered.forEach(d => {
                 const date = new Date(d.day + 'T00:00:00');
                 const weekStart = new Date(date);
                 weekStart.setDate(date.getDate() - date.getDay());
@@ -927,6 +982,48 @@
     }
 
     // ================================================
+    // Render: DAU Table
+    // ================================================
+    function renderDAUTable(data) {
+        document.getElementById('dau-table-loading').style.display = 'none';
+
+        // Data is DESC — show most recent first, skip unsettled days
+        const settled = data.filter((_, i) => i >= findSettledDay(data));
+
+        let html = `<table class="streak-table">
+            <thead><tr>
+                <th>Date</th>
+                <th>Total DAU</th>
+                <th>Goal DAU</th>
+                <th>Completions</th>
+                <th>Goal %</th>
+                <th>Completion Rate</th>
+            </tr></thead><tbody>`;
+
+        settled.forEach((row, i) => {
+            const prev = settled[i + 1];
+            const dauChange = pctChange(row.total_dau, prev?.total_dau);
+            const changeHtml = dauChange != null
+                ? ` <span style="color:${parseFloat(dauChange) >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:0.72rem">${parseFloat(dauChange) >= 0 ? '\u2191' : '\u2193'}${Math.abs(parseFloat(dauChange))}%</span>`
+                : '';
+            const goalPct = row.total_dau > 0 ? (row.daily_goal_dau / row.total_dau * 100).toFixed(1) : '\u2014';
+            const completionRate = row.daily_goal_dau > 0 ? (row.daily_goal_completions / row.daily_goal_dau * 100).toFixed(1) : '\u2014';
+
+            html += `<tr>
+                <td>${fmtDate(row.day)}</td>
+                <td>${fmt(row.total_dau)}${changeHtml}</td>
+                <td>${fmt(row.daily_goal_dau)}</td>
+                <td>${fmt(row.daily_goal_completions)}</td>
+                <td>${goalPct}%</td>
+                <td>${completionRate}%</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table>';
+        document.getElementById('dau-table-container').innerHTML = html;
+    }
+
+    // ================================================
     // Render: Streaks Table
     // ================================================
     function renderStreaksTable(data) {
@@ -1020,17 +1117,26 @@
             const dau = dauRes.value;
             updateDAUCards(dau);
             renderDAUChart(dau);
+            renderDAUTable(dau);
         } else if (dauRes.status === 'rejected') {
             showToast('Failed to load DAU: ' + (dauRes.reason?.message || 'Unknown error'));
         }
 
         // Signups
         if (signupsRes.status === 'fulfilled' && signupsRes.value?.length) {
-            const signups = signupsRes.value;
-            const total = signups.reduce((s, d) => s + Number(d.user_count), 0);
-            const todaySignups = Number(signups[signups.length - 1]?.user_count || 0);
-            setCard('card-signups', total, null, '+' + todaySignups + ' today');
-            renderSignupsChart(signups);
+            allSignups = signupsRes.value;
+            const total = allSignups.reduce((s, d) => s + Number(d.user_count), 0);
+            // Find latest settled day for signups
+            const now = new Date();
+            const todayStr = now.toISOString().split('T')[0];
+            const tmrw = new Date(now); tmrw.setDate(tmrw.getDate() + 1);
+            const tomorrowStr = tmrw.toISOString().split('T')[0];
+            const skipSet = new Set([todayStr, tomorrowStr]);
+            const settledSignups = allSignups.filter(d => !skipSet.has(d.day));
+            const latestSignup = settledSignups[settledSignups.length - 1];
+            const latestCount = latestSignup ? Number(latestSignup.user_count) : 0;
+            setCard('card-signups', total, null, '+' + latestCount + ' on ' + (latestSignup ? fmtDate(latestSignup.day) : '—'));
+            renderSignupsChart(allSignups, currentRange);
         } else if (signupsRes.status === 'rejected') {
             showToast('Failed to load signups: ' + (signupsRes.reason?.message || 'Unknown error'));
         }
@@ -1067,8 +1173,14 @@
             if (dau?.length) {
                 renderDAUChart(dau);
                 updateDAUCards(dau);
+                renderDAUTable(dau);
             }
         }).catch(e => showToast('Failed to load DAU: ' + e.message));
+
+        // Re-render signups for new range
+        if (allSignups.length) {
+            renderSignupsChart(allSignups, range);
+        }
     }
 
     async function refresh() {
