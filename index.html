@@ -632,11 +632,24 @@
     const SUPABASE_URL = 'https://pqsxbxikwcybkzzzgjse.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBxc3hieGlrd2N5Ymt6enpnanNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUxOTc4OTUsImV4cCI6MjA2MDc3Mzg5NX0.k3CdmedX-yllzCL6YVighPq8ZvksH97E8opNQWcgB-w';
 
-    const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+    });
 
     let currentRange = 7;
     let charts = {};
     let allSignups = [];
+
+    // Retry wrapper — retries once after 2s on failure
+    async function fetchRetry(fn, retries = 1) {
+        for (let i = 0; i <= retries; i++) {
+            try { return await fn(); }
+            catch (e) {
+                if (i === retries) throw e;
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+    }
 
     // ================================================
     // Utilities
@@ -732,23 +745,28 @@
     // Data Fetching
     // ================================================
     async function fetchDAU(days) {
-        // Fetch extra 7 days for WoW comparison
-        const extra = days === 'all' ? 'all' : Number(days) + 7;
-        const { data, error } = await db.rpc('dashboard_dau', { since_date: sinceDate(extra) });
-        if (error) throw error;
-        return data;
+        return fetchRetry(async () => {
+            const extra = days === 'all' ? 'all' : Number(days) + 7;
+            const { data, error } = await db.rpc('dashboard_dau', { since_date: sinceDate(extra) });
+            if (error) throw error;
+            return data;
+        });
     }
 
     async function fetchSignups() {
-        const { data, error } = await db.rpc('dashboard_signups');
-        if (error) throw error;
-        return data;
+        return fetchRetry(async () => {
+            const { data, error } = await db.rpc('dashboard_signups');
+            if (error) throw error;
+            return data;
+        });
     }
 
     async function fetchStreaks() {
-        const { data, error } = await db.rpc('dashboard_streaks');
-        if (error) throw error;
-        return data;
+        return fetchRetry(async () => {
+            const { data, error } = await db.rpc('dashboard_streaks');
+            if (error) throw error;
+            return data;
+        });
     }
 
     // ================================================
