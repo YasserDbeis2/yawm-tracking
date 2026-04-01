@@ -68,8 +68,8 @@
         .header {
             position: sticky;
             top: 0;
-            z-index: 100;
-            background: rgba(6,10,18,0.82);
+            z-index: 1000;
+            background: rgba(6,10,18,0.92);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
             border-bottom: 1px solid var(--border);
@@ -250,6 +250,20 @@
             color: var(--text-3);
             font-family: var(--font-mono);
         }
+
+        .card-wow {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.72rem;
+            font-family: var(--font-mono);
+            margin-top: 6px;
+            min-height: 18px;
+        }
+
+        .card-wow.up { color: var(--green); }
+        .card-wow.down { color: var(--red); }
+        .card-wow.neutral { color: var(--text-3); }
 
         /* Skeleton loading */
         .skeleton {
@@ -474,9 +488,9 @@
         </div>
         <div class="header-right">
             <div class="range-group">
-                <button class="range-btn" data-range="7" onclick="setRange(7)">7D</button>
+                <button class="range-btn active" data-range="7" onclick="setRange(7)">7D</button>
                 <button class="range-btn" data-range="30" onclick="setRange(30)">30D</button>
-                <button class="range-btn active" data-range="90" onclick="setRange(90)">90D</button>
+                <button class="range-btn" data-range="90" onclick="setRange(90)">90D</button>
                 <button class="range-btn" data-range="all" onclick="setRange('all')">ALL</button>
             </div>
             <button class="refresh-btn" onclick="refresh()">
@@ -499,12 +513,14 @@
                 <span class="card-label">Daily Active Users</span>
                 <span class="card-value skeleton">&nbsp;&nbsp;&nbsp;&nbsp;</span>
                 <span class="card-sub neutral"></span>
+                <span class="card-wow neutral"></span>
             </div>
             <div class="metric-card" id="card-completions">
                 <div class="card-accent" style="background: linear-gradient(90deg, var(--teal), transparent)"></div>
                 <span class="card-label">Goal Completions</span>
                 <span class="card-value skeleton">&nbsp;&nbsp;&nbsp;&nbsp;</span>
                 <span class="card-sub neutral"></span>
+                <span class="card-wow neutral"></span>
             </div>
             <div class="metric-card" id="card-signups">
                 <div class="card-accent" style="background: linear-gradient(90deg, var(--blue), transparent)"></div>
@@ -582,7 +598,7 @@
 
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    let currentRange = 90;
+    let currentRange = 7;
     let charts = {};
 
     // ================================================
@@ -613,10 +629,11 @@
     // ================================================
     // Card Updates
     // ================================================
-    function setCard(id, value, change, subText) {
+    function setCard(id, value, change, subText, wow) {
         const card = document.getElementById(id);
         const valEl = card.querySelector('.card-value');
         const subEl = card.querySelector('.card-sub');
+        const wowEl = card.querySelector('.card-wow');
 
         valEl.classList.remove('skeleton');
         valEl.textContent = fmt(value);
@@ -632,13 +649,48 @@
             subEl.className = 'card-sub neutral';
             subEl.innerHTML = `<span class="card-date">${subText}</span>`;
         }
+
+        if (wowEl && wow != null) {
+            const n = parseFloat(wow);
+            const isUp = n > 0;
+            const isZero = n === 0;
+            wowEl.className = 'card-wow ' + (isZero ? 'neutral' : isUp ? 'up' : 'down');
+            wowEl.textContent = `${isUp ? '\u2191' : isZero ? '\u2192' : '\u2193'} ${Math.abs(n)}% vs last week`;
+        }
+    }
+
+    // Find the latest "settled" day — skip today and potentially
+    // tomorrow (UTC can push data 1-2 days ahead of local time)
+    function findSettledDay(data) {
+        const now = new Date();
+        // Local "today" date string
+        const today = now.toISOString().split('T')[0];
+        // Also compute tomorrow in case UTC is ahead
+        const tmrw = new Date(now);
+        tmrw.setDate(tmrw.getDate() + 1);
+        const tomorrow = tmrw.toISOString().split('T')[0];
+
+        const skip = new Set([today, tomorrow]);
+        // Data is sorted DESC by day
+        return data.findIndex(d => !skip.has(d.day));
+    }
+
+    // Find same weekday from ~7 days ago in data
+    function findWoW(data, refDay) {
+        const ref = new Date(refDay + 'T00:00:00');
+        const target = new Date(ref);
+        target.setDate(target.getDate() - 7);
+        const targetStr = target.toISOString().split('T')[0];
+        return data.find(d => d.day === targetStr);
     }
 
     // ================================================
     // Data Fetching
     // ================================================
     async function fetchDAU(days) {
-        const { data, error } = await db.rpc('dashboard_dau', { since_date: sinceDate(days) });
+        // Fetch extra 7 days for WoW comparison
+        const extra = days === 'all' ? 'all' : Number(days) + 7;
+        const { data, error } = await db.rpc('dashboard_dau', { since_date: sinceDate(extra) });
         if (error) throw error;
         return data;
     }
@@ -933,6 +985,27 @@
     }
 
     // ================================================
+    // Update DAU Cards (settled day + WoW)
+    // ================================================
+    function updateDAUCards(dau) {
+        const idx = findSettledDay(dau);
+        if (idx < 0) return;
+        const curr = dau[idx];
+        const prev = dau[idx + 1];
+        const wow = findWoW(dau, curr.day);
+
+        setCard('card-dau', curr.total_dau,
+            pctChange(curr.total_dau, prev?.total_dau),
+            fmtDate(curr.day),
+            wow ? pctChange(curr.total_dau, wow.total_dau) : null);
+
+        setCard('card-completions', curr.daily_goal_completions,
+            pctChange(curr.daily_goal_completions, prev?.daily_goal_completions),
+            fmtDate(curr.day),
+            wow ? pctChange(curr.daily_goal_completions, wow.daily_goal_completions) : null);
+    }
+
+    // ================================================
     // Load Dashboard
     // ================================================
     async function loadDashboard() {
@@ -945,16 +1018,7 @@
         // DAU
         if (dauRes.status === 'fulfilled' && dauRes.value?.length) {
             const dau = dauRes.value;
-            const today = new Date().toISOString().split('T')[0];
-            const idx = dau[0].day === today && dau.length > 1 ? 1 : 0;
-            const curr = dau[idx];
-            const prev = dau[idx + 1];
-
-            setCard('card-dau', curr.total_dau,
-                pctChange(curr.total_dau, prev?.total_dau), fmtDate(curr.day));
-            setCard('card-completions', curr.daily_goal_completions,
-                pctChange(curr.daily_goal_completions, prev?.daily_goal_completions), fmtDate(curr.day));
-
+            updateDAUCards(dau);
             renderDAUChart(dau);
         } else if (dauRes.status === 'rejected') {
             showToast('Failed to load DAU: ' + (dauRes.reason?.message || 'Unknown error'));
@@ -1002,14 +1066,7 @@
         fetchDAU(range).then(dau => {
             if (dau?.length) {
                 renderDAUChart(dau);
-                const today = new Date().toISOString().split('T')[0];
-                const idx = dau[0].day === today && dau.length > 1 ? 1 : 0;
-                const curr = dau[idx];
-                const prev = dau[idx + 1];
-                setCard('card-dau', curr.total_dau,
-                    pctChange(curr.total_dau, prev?.total_dau), fmtDate(curr.day));
-                setCard('card-completions', curr.daily_goal_completions,
-                    pctChange(curr.daily_goal_completions, prev?.daily_goal_completions), fmtDate(curr.day));
+                updateDAUCards(dau);
             }
         }).catch(e => showToast('Failed to load DAU: ' + e.message));
     }
