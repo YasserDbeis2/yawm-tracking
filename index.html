@@ -66,12 +66,12 @@
 
         /* ========== Header ========== */
         .header {
-            position: sticky;
+            position: fixed;
             top: 0;
+            left: 0;
+            right: 0;
             z-index: 1000;
-            background: rgba(6,10,18,0.92);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            background: var(--bg-deep);
             border-bottom: 1px solid var(--border);
             padding: 14px 32px;
             display: flex;
@@ -184,7 +184,7 @@
         .dashboard {
             max-width: 1440px;
             margin: 0 auto;
-            padding: var(--gap) 32px 60px;
+            padding: 72px 32px 60px;
             display: flex;
             flex-direction: column;
             gap: var(--gap);
@@ -476,7 +476,7 @@
             .cards-grid { grid-template-columns: repeat(2, 1fr); }
             .charts-row { grid-template-columns: 1fr; }
             .header { padding: 14px 20px; }
-            .dashboard { padding: var(--gap) 20px 40px; }
+            .dashboard { padding: 72px 20px 40px; }
         }
 
         @media (max-width: 640px) {
@@ -495,7 +495,7 @@
             .card-value { font-size: 1.6rem; }
             .chart-wrap { height: 260px; }
             .chart-wrap.tall { height: 300px; }
-            .dashboard { padding: var(--gap) 14px 40px; }
+            .dashboard { padding: 100px 14px 40px; }
         }
     </style>
 </head>
